@@ -10,6 +10,7 @@
 \usepackage{float}
 \usepackage[numbers]{natbib}
 
+
 \title{AI600 --- Assignment~3\\Deep Learning with CNNs and Transfer Learning}
 \author{Muhammad Tayyab Tahir Qureshi\\
 \texttt{25280024}\\[4pt]
@@ -18,7 +19,145 @@ GitHub: \url{https://github.com/ttqureshi/AI600_PA3}}
 
 \begin{document}
 \maketitle
+\vspace*{\fill}
 
+\newpage
+
+\vspace*{\fill}
+\begin{center}
+    \Huge{Analytical Section}
+\end{center}
+\vspace*{\fill}
+\newpage
+% ===================================================================
+\section{Analytical Questions}
+% ===================================================================
+
+% -------------------------------------------------------------------
+\subsection{Q1c --- Which filter weight changes the most, and why?}
+% -------------------------------------------------------------------
+
+From the computed gradient matrix:
+\[
+\frac{\partial L}{\partial W} = \begin{bmatrix} 0.25 & -1.25 \\ 0.5 & -0.5 \end{bmatrix}
+\]
+
+The largest magnitude belongs to $W_{12}$ with a gradient of $-1.25$. In one
+step of gradient descent, $W_{12}$ would therefore change the most, and it
+would \emph{increase} (since we subtract the gradient).
+
+Structurally, $W_{12}$ is the top-right element of the filter, so during the
+forward pass it multiplies the second column of each $2\times2$ patch it lands
+on. Looking at the four sliding positions, the dominant contribution comes from
+position $(1,1)$, where $W_{12}$ multiplied $X_{12} = 2$ --- the largest
+single input value in any patch. This large activation amplifies the upstream
+gradient $\delta_{11} = -0.5$, giving a contribution of $(-0.5)(2) = -1.0$
+to the total. The other non-zero contribution comes from position $(2,2)$,
+where $W_{12}$ saw $X_{23} = 1$, adding another $(-0.25)(1) = -0.25$.
+Position $(2,1)$ would have contributed too, but $Z_{21} = -1$ was killed by
+ReLU, zeroing that gradient entirely. Together, these effects push $W_{12}$'s
+gradient to the largest magnitude in the filter.
+
+% ===================================================================
+\section{Q3: Pooling and Normalization}
+% ===================================================================
+
+% -------------------------------------------------------------------
+\subsection{Q3a --- Max Pooling}
+% -------------------------------------------------------------------
+
+Replacing the flatten + FC layer with $2\times2$ global max pooling over $A$:
+\[
+A = \begin{bmatrix}2 & 2 \\ 0 & 3\end{bmatrix}
+\quad \Rightarrow \quad
+Y = \max(A) = 3 \quad \text{(at position } A_{22}\text{)}
+\]
+
+For the gradient flow, max pooling acts as a hard selector: only the winning
+neuron receives gradient; all others get zero. Formally,
+\[
+\frac{\partial Y}{\partial A_{ij}} =
+\begin{cases} 1 & \text{if } A_{ij} = \max(A) \\ 0 & \text{otherwise} \end{cases}
+\]
+
+So $\partial L / \partial A$ is a $2\times2$ matrix with a $1$ only at position
+$(2,2)$ (scaled by $\partial L/\partial Y$), compared to the original
+architecture where all four positions received gradient through their respective
+weights in $V$.
+
+Tracing back through ReLU and the convolution, $A_{22}$ was produced by the
+bottom-right $2\times2$ patch of $X$: $\{X_{22}, X_{23}, X_{32}, X_{33}\}$.
+Every pixel that does \emph{not} belong to this patch, or belongs only to a
+position killed by ReLU (specifically $Z_{21}=-1$), has \textbf{zero gradient}.
+This means six of the nine pixels in $X$ --- the entire top row
+($X_{11}, X_{12}, X_{13}$), plus $X_{21}$ and $X_{31}$ --- contribute nothing
+to the update.
+
+% -------------------------------------------------------------------
+\subsection{Q3b --- Layer Normalization}
+% -------------------------------------------------------------------
+
+Inserting Layer Normalization after ReLU, applied to $A$ treated as a flat
+4-element vector $[2, 2, 0, 3]$ (with $\gamma=1$, $\beta=0$, $\epsilon=0$):
+
+\[
+\mu = \frac{2+2+0+3}{4} = 1.75
+\]
+\[
+\sigma^2 = \frac{(0.25)^2 + (0.25)^2 + (-1.75)^2 + (1.25)^2}{4}
+         = \frac{0.0625 + 0.0625 + 3.0625 + 1.5625}{4} = 1.1875
+\]
+\[
+\sigma = \sqrt{1.1875} \approx 1.0898
+\]
+
+Normalizing each element $\hat{a}_i = (a_i - \mu)/\sigma$:
+
+\begin{center}
+\begin{tabular}{cccc}
+\toprule
+$a_{11}$ & $a_{12}$ & $a_{21}$ & $a_{22}$ \\
+\midrule
+$\frac{0.25}{1.0898} \approx +0.2294$ &
+$\frac{0.25}{1.0898} \approx +0.2294$ &
+$\frac{-1.75}{1.0898} \approx -1.6059$ &
+$\frac{1.25}{1.0898} \approx +1.1471$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\[
+A_{\text{norm}} = \begin{bmatrix} 0.2294 & 0.2294 \\ -1.6059 & 1.1471 \end{bmatrix}
+\]
+
+% -------------------------------------------------------------------
+\subsection{Q3c --- Why Max Pooling Gives Translation Invariance}
+% -------------------------------------------------------------------
+
+In the original architecture, $Y = V \cdot A_{\text{flat}} + c$ depends on
+the \emph{spatial positions} of activations. Shifting the input moves a strong
+activation from one position to another, changing which weight in $V$ it gets
+multiplied by, and therefore changing $Y$.
+
+With max pooling, $Y = \max(A)$ depends only on the \emph{value} of the
+largest activation, not where it sits in the feature map. So as long as a
+small spatial shift preserves which patch fires most strongly --- i.e.\ the
+maximum response stays the same --- the output $Y$ and the loss $L$ are
+unchanged. Mathematically, if a shift maps $A \to A'$ but
+$\max(A') = \max(A)$, then $L$ is identical for both inputs.
+
+This is the key advantage of global max pooling for classification: moderate
+translations that do not destroy the dominant feature response leave the
+prediction completely unaffected.
+
+\newpage
+
+\vspace*{\fill}
+\begin{center}
+    \Huge{Programming Section}
+\end{center}
+\vspace*{\fill}
+\newpage
 % ===================================================================
 \section{Introduction}
 % ===================================================================
@@ -74,12 +213,12 @@ the total to \textbf{25{,}178}. Both configurations are well within the
 \begin{figure}[H]
 \centering
 \begin{subfigure}{0.48\textwidth}
-  \includegraphics[width=\linewidth]{../Task1_CNN/plots/mnist_loss.png}
+  \includegraphics[width=\linewidth]{plots/mnist_loss.png}
   \caption{Loss vs.\ epochs}
 \end{subfigure}
 \hfill
 \begin{subfigure}{0.48\textwidth}
-  \includegraphics[width=\linewidth]{../Task1_CNN/plots/mnist_accuracy.png}
+  \includegraphics[width=\linewidth]{plots/mnist_accuracy.png}
   \caption{Accuracy vs.\ epochs}
 \end{subfigure}
 \caption{MNIST training and validation curves over 15 epochs.}
@@ -128,7 +267,7 @@ relatively simple MNIST task.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.85\linewidth]{../Task1_CNN/plots/mnist_filters.png}
+\includegraphics[width=0.85\linewidth]{plots/mnist_filters.png}
 \caption{Learned filters of the first convolutional layer (8 filters, $3\times3$).}
 \label{fig:filters}
 \end{figure}
@@ -159,12 +298,12 @@ into strokes, junctions, and digit parts to achieve 98.97\% accuracy.
 \begin{figure}[H]
 \centering
 \begin{subfigure}{0.48\textwidth}
-  \includegraphics[width=\linewidth]{../Task1_CNN/plots/cmnist_loss.png}
+  \includegraphics[width=\linewidth]{plots/cmnist_loss.png}
   \caption{Loss vs.\ epochs}
 \end{subfigure}
 \hfill
 \begin{subfigure}{0.48\textwidth}
-  \includegraphics[width=\linewidth]{../Task1_CNN/plots/cmnist_accuracy.png}
+  \includegraphics[width=\linewidth]{plots/cmnist_accuracy.png}
   \caption{Accuracy vs.\ epochs}
 \end{subfigure}
 \caption{C-MNIST training and biased-validation curves over 15 epochs.}
@@ -173,7 +312,7 @@ into strokes, junctions, and digit parts to achieve 98.97\% accuracy.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.85\linewidth]{../Task1_CNN/plots/cmnist_samples.png}
+\includegraphics[width=0.85\linewidth]{plots/cmnist_samples.png}
 \caption{Sample C-MNIST training images (biased: colour correlates with label).}
 \label{fig:cmnist_samples}
 \end{figure}
@@ -264,12 +403,12 @@ Fraction trainable   & 0.046\% \\
 \begin{figure}[H]
 \centering
 \begin{subfigure}{0.48\textwidth}
-  \includegraphics[width=\linewidth]{../Task2_TransferLearning/plots/stl10_loss.png}
+  \includegraphics[width=\linewidth]{plots/stl10_loss.png}
   \caption{Loss vs.\ epochs}
 \end{subfigure}
 \hfill
 \begin{subfigure}{0.48\textwidth}
-  \includegraphics[width=\linewidth]{../Task2_TransferLearning/plots/stl10_accuracy.png}
+  \includegraphics[width=\linewidth]{plots/stl10_accuracy.png}
   \caption{Accuracy vs.\ epochs}
 \end{subfigure}
 \caption{STL-10 training and validation curves (frozen backbone, 15 epochs).}
@@ -334,12 +473,12 @@ images (test indices 17, 20---also airplanes, predicted as a different class).
 \begin{figure}[H]
 \centering
 \begin{subfigure}{0.48\textwidth}
-  \includegraphics[width=\linewidth]{../Task2_TransferLearning/plots/gradcam_correct_1.png}
+  \includegraphics[width=\linewidth]{plots/gradcam_correct_1.png}
   \caption{Correct prediction 1 (airplane)}
 \end{subfigure}
 \hfill
 \begin{subfigure}{0.48\textwidth}
-  \includegraphics[width=\linewidth]{../Task2_TransferLearning/plots/gradcam_correct_2.png}
+  \includegraphics[width=\linewidth]{plots/gradcam_correct_2.png}
   \caption{Correct prediction 2 (airplane)}
 \end{subfigure}
 \caption{GradCAM heatmaps for correctly classified STL-10 images.}
@@ -361,12 +500,12 @@ correct class.
 \begin{figure}[H]
 \centering
 \begin{subfigure}{0.48\textwidth}
-  \includegraphics[width=\linewidth]{../Task2_TransferLearning/plots/gradcam_wrong_1.png}
+  \includegraphics[width=\linewidth]{plots/gradcam_wrong_1.png}
   \caption{Incorrect prediction 1 (true: airplane)}
 \end{subfigure}
 \hfill
 \begin{subfigure}{0.48\textwidth}
-  \includegraphics[width=\linewidth]{../Task2_TransferLearning/plots/gradcam_wrong_2.png}
+  \includegraphics[width=\linewidth]{plots/gradcam_wrong_2.png}
   \caption{Incorrect prediction 2 (true: airplane)}
 \end{subfigure}
 \caption{GradCAM heatmaps for misclassified STL-10 images.}
